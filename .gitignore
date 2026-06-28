@@ -3,3 +3,10 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Node
+node_modules/
+
+# WhatsApp session — this IS your login. Never commit it.
+.wwebjs_auth/
+.wwebjs_cache/

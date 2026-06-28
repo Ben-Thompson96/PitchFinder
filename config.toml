@@ -15,3 +15,9 @@ category = "5 a side football"
 name = "Stockwell"
 place_id = 1403
 category = "5 a side football"
+
+# Used only by the Node auto-poster (whatsapp-bot/). The Python script ignores this.
+[whatsapp]
+# Your group's id, e.g. "120363012345678901@g.us".
+# Find it by running `npm run groups` inside whatsapp-bot/.
+group_id = ""

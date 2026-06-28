@@ -7,7 +7,16 @@ The pitches are booked via [hireapitch.com](https://hireapitch.com). Its
 calendar loads availability from a public JSON endpoint (no login needed), so
 this just queries that endpoint directly — no scraping, no browser.
 
-## Run it
+## Two ways to post
+
+Both read the same `config.toml`; pick whichever you fancy on the day.
+
+- **Manual (Python)** — prints the slots, you create the WhatsApp poll. Zero
+  setup, no dependencies. See below.
+- **Automatic (Node)** — posts the real native poll to your group for you. A bit
+  more setup. See [`whatsapp-bot/`](whatsapp-bot/).
+
+## Manual: `pitchfinder.py`
 
 ```
 python pitchfinder.py

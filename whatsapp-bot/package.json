@@ -1,0 +1,16 @@
+{
+  "name": "pitchfinder-whatsapp-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Auto-posts the PitchFinder 5-a-side poll to a WhatsApp group.",
+  "scripts": {
+    "start": "node post-poll.js",
+    "groups": "node post-poll.js --list-groups",
+    "dry-run": "node post-poll.js --dry-run"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.7"
+  }
+}

@@ -13,7 +13,7 @@ this just queries that endpoint directly — no scraping, no browser.
 python pitchfinder.py
 ```
 
-No dependencies — standard library only (Python 3.9+).
+No dependencies — standard library only (Python 3.11+, for `tomllib`).
 
 Copy the output into WhatsApp: tap ➕ → **Poll**, paste the question, then paste
 each slot line as an option.
@@ -26,8 +26,8 @@ each slot line as an option.
 
 ## Tweaking it
 
-Everything adjustable lives at the top of `pitchfinder.py`:
+Everything adjustable lives in `config.toml` — no need to touch the code:
 
-- `VENUES` — add/remove pitches. Each needs a `place_id`, found in a venue
+- `[[venues]]` — add/remove pitches. Each needs a `place_id`, found in a venue
   page's source as `<input id="ID" value="...">`.
-- `ALLOWED_START_HOURS` — change the kickoff times (24h, e.g. `{18, 19, 20}`).
+- `allowed_start_hours` — change the kickoff times (24h, e.g. `[18, 19, 20]`).

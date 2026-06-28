@@ -13,27 +13,28 @@ Run it:   python pitchfinder.py
 
 import json
 import sys
+import tomllib
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Windows consoles default to cp1252, which can't print £ or emoji. Force UTF-8.
 sys.stdout.reconfigure(encoding="utf-8")
 
 # --- Config -----------------------------------------------------------------
 
-# Each venue's "PlaceID" is the internal id hireapitch uses. You can find it by
-# viewing a venue page's source and searching for <input id="ID" value="...">.
-VENUES = [
-    {"name": "Brixton 4G",   "place_id": 449,  "category": "5 a side football"},
-    {"name": "Allen Edwards", "place_id": 1403, "category": "5 a side football"},
-]
-
-# Only keep games kicking off at these hours (24h). "After 5pm, before 8pm" =
-# a 6pm or 7pm start (the 7pm game finishes at 8pm).
-ALLOWED_START_HOURS = {18, 19}
+# Editable settings (venues, start hours) live in config.toml next to this file.
+CONFIG_PATH = Path(__file__).parent / "config.toml"
 
 API_URL = "https://hireapitch.com/venue/getBookingSlots"
+
+
+def load_config():
+    """Read config.toml and return (venues, allowed_start_hours)."""
+    with open(CONFIG_PATH, "rb") as f:
+        config = tomllib.load(f)
+    return config["venues"], set(config["allowed_start_hours"])
 
 
 # --- Talking to hireapitch --------------------------------------------------
@@ -65,7 +66,7 @@ def fetch_slots(venue, start, end):
         return json.loads(response.read())
 
 
-def free_evening_slots(venue, start, end):
+def free_evening_slots(venue, start, end, allowed_hours):
     """Return only the bookable evening slots for one venue, as simple dicts."""
     slots = []
     for slot in fetch_slots(venue, start, end):
@@ -74,7 +75,7 @@ def free_evening_slots(venue, start, end):
         when = datetime.fromisoformat(slot["start"])
         if when.weekday() > 4:         # Mon–Fri only (the endpoint's date range is loose)
             continue
-        if when.hour not in ALLOWED_START_HOURS:
+        if when.hour not in allowed_hours:
             continue
         slots.append({"venue": venue["name"], "when": when, "price": slot["title"]})
     return slots
@@ -109,13 +110,14 @@ def format_option(slot):
 
 
 def main():
+    venues, allowed_hours = load_config()
     monday, saturday = coming_week()
     friday = monday + timedelta(days=4)
 
     all_slots = []
-    for venue in VENUES:
+    for venue in venues:
         try:
-            all_slots.extend(free_evening_slots(venue, monday, saturday))
+            all_slots.extend(free_evening_slots(venue, monday, saturday, allowed_hours))
         except Exception as error:
             print(f"⚠️  Couldn't fetch {venue['name']}: {error}")
 

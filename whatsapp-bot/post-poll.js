@@ -143,6 +143,27 @@ function attachQr(client) {
   });
 }
 
+// Resolve with the ack level once WhatsApp's server confirms the message
+// (ack >= 1 = single tick / server received), or 0 if nothing arrives in time.
+// Without this we'd destroy the client before the message actually flushes.
+function waitForServerAck(client, sent, timeoutMs) {
+  return new Promise((resolve) => {
+    const target = sent.id._serialized;
+    const onAck = (msg, ack) => {
+      if (msg.id._serialized === target && ack >= 1) {
+        client.removeListener("message_ack", onAck);
+        clearTimeout(timer);
+        resolve(ack);
+      }
+    };
+    const timer = setTimeout(() => {
+      client.removeListener("message_ack", onAck);
+      resolve(0);
+    }, timeoutMs);
+    client.on("message_ack", onAck);
+  });
+}
+
 async function runDryRun() {
   const { question, options, trimmed } = await buildPoll();
   console.log(`\n${question}\n`);
@@ -171,7 +192,7 @@ function runListGroups() {
   client.initialize();
 }
 
-async function runPost(destOverride) {
+async function runPost(destOverride, textOverride) {
   const { question, options, trimmed, groupId } = await buildPoll();
   const dest = destOverride || groupId;
 
@@ -180,20 +201,37 @@ async function runPost(destOverride) {
       "(e.g. --to 447911123456 to message yourself).");
     process.exit(1);
   }
-  if (options.length < 2) {
-    console.log("Fewer than 2 free slots next week — nothing to post (a poll needs at least 2 options).");
-    process.exit(0);
+
+  // --text sends a plain message instead of the poll (handy for diagnosing).
+  let content;
+  if (textOverride) {
+    content = textOverride;
+  } else {
+    if (options.length < 2) {
+      console.log("Fewer than 2 free slots next week — nothing to post (a poll needs at least 2 options).");
+      process.exit(0);
+    }
+    if (trimmed) console.log(`⚠️  ${trimmed} extra slot(s) dropped — WhatsApp polls allow max ${MAX_POLL_OPTIONS}.`);
+    content = new Poll(question, options, { allowMultipleAnswers: true });
   }
-  if (trimmed) console.log(`⚠️  ${trimmed} extra slot(s) dropped — WhatsApp polls allow max ${MAX_POLL_OPTIONS}.`);
 
   const client = makeClient();
   attachQr(client);
   client.on("ready", async () => {
-    const poll = new Poll(question, options, { allowMultipleAnswers: true });
-    await client.sendMessage(dest, poll);
-    console.log(`Posted poll with ${options.length} option(s) to ${dest}.`);
-    await client.destroy();
-    process.exit(0);
+    try {
+      const sent = await client.sendMessage(dest, content);
+      const ack = await waitForServerAck(client, sent, 20000);
+      if (ack >= 1) {
+        console.log(`Sent to ${dest} — confirmed by server (ack=${ack}).`);
+      } else {
+        console.log(`⚠️  Sent to ${dest} but got NO server confirmation in 20s — it likely didn't go through.`);
+      }
+    } catch (err) {
+      console.error(`Send failed: ${err.message || err}`);
+    } finally {
+      await client.destroy();
+      process.exit(0);
+    }
   });
   client.initialize();
 }
@@ -221,5 +259,5 @@ if (args.includes("--dry-run")) {
 } else if (args.includes("--list-groups")) {
   runListGroups();
 } else {
-  runPost(normalizeChatId(argValue("--to")));
+  runPost(normalizeChatId(argValue("--to")), argValue("--text"));
 }

@@ -33,6 +33,18 @@ group_id = "120363012345678901@g.us"
 The login is saved in `.wwebjs_auth/` (gitignored — it's your session, never
 commit it), so you only scan the QR once.
 
+## Test it on yourself first
+
+Before posting to the group, send the poll to your own "Message yourself" chat.
+`npm run groups` prints your own id at the top — or just use your number:
+
+```
+node post-poll.js --to 447911123456     # bare number = personal chat (your own = message yourself)
+node post-poll.js --to 447911123456@c.us
+```
+
+`--to` overrides the group in config, so nothing lands in the group while you test.
+
 ## Each week
 
 Check what it'll post first:

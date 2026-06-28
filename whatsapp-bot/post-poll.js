@@ -159,6 +159,7 @@ function runListGroups() {
   const client = makeClient();
   attachQr(client);
   client.on("ready", async () => {
+    console.log(`\nMessage yourself (handy for testing): ${client.info.wid._serialized}`);
     const chats = await client.getChats();
     console.log("\nYour groups (copy the id into config.toml → [whatsapp] group_id):\n");
     for (const chat of chats.filter((c) => c.isGroup)) {
@@ -170,11 +171,13 @@ function runListGroups() {
   client.initialize();
 }
 
-async function runPost() {
+async function runPost(destOverride) {
   const { question, options, trimmed, groupId } = await buildPoll();
+  const dest = destOverride || groupId;
 
-  if (!groupId) {
-    console.error("No group id set. Run `npm run groups` and put it in config.toml → [whatsapp] group_id.");
+  if (!dest) {
+    console.error("No destination. Set [whatsapp] group_id in config.toml, or pass --to <id> " +
+      "(e.g. --to 447911123456 to message yourself).");
     process.exit(1);
   }
   if (options.length < 2) {
@@ -187,8 +190,8 @@ async function runPost() {
   attachQr(client);
   client.on("ready", async () => {
     const poll = new Poll(question, options, { allowMultipleAnswers: true });
-    await client.sendMessage(groupId, poll);
-    console.log(`Posted poll with ${options.length} option(s) to ${groupId}.`);
+    await client.sendMessage(dest, poll);
+    console.log(`Posted poll with ${options.length} option(s) to ${dest}.`);
     await client.destroy();
     process.exit(0);
   });
@@ -198,10 +201,25 @@ async function runPost() {
 // --- Entry point ------------------------------------------------------------
 
 const args = process.argv.slice(2);
+
+function argValue(name) {
+  const eq = args.find((a) => a.startsWith(name + "="));
+  if (eq) return eq.slice(name.length + 1);
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : null;
+}
+
+// Accept a full chat id (...@c.us / ...@g.us) or a bare phone number, which we
+// treat as a personal chat.
+function normalizeChatId(id) {
+  if (!id || id.includes("@")) return id;
+  return id.replace(/\D/g, "") + "@c.us";
+}
+
 if (args.includes("--dry-run")) {
   runDryRun();
 } else if (args.includes("--list-groups")) {
   runListGroups();
 } else {
-  runPost();
+  runPost(normalizeChatId(argValue("--to")));
 }

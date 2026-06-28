@@ -7,11 +7,11 @@ allowed_start_hours = [18, 19]
 # One [[venues]] block per pitch. "place_id" is the internal id hireapitch uses;
 # find it in a venue page's source as <input id="ID" value="...">.
 [[venues]]
-name = "Brixton 4G"
+name = "Brixton"
 place_id = 449
 category = "5 a side football"
 
 [[venues]]
-name = "Allen Edwards"
+name = "Stockwell"
 place_id = 1403
 category = "5 a side football"

@@ -23,6 +23,14 @@ npm run groups
 
 The first time, a QR code appears in the terminal — scan it with **WhatsApp →
 Settings → Linked devices → Link a device**. It then prints your groups and ids.
+
+If a group doesn't show up (WhatsApp Web only syncs recent chats up front), use
+the reliable fallback instead — it prints a group's id the moment you post in it:
+
+```
+npm run find-group      # then send any message in the group from your phone
+```
+
 Copy the right id (looks like `120363...@g.us`) into `../config.toml`:
 
 ```toml

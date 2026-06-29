@@ -181,14 +181,42 @@ function runListGroups() {
   attachQr(client);
   client.on("ready", async () => {
     console.log(`\nMessage yourself (handy for testing): ${client.info.wid._serialized}`);
+    await new Promise((r) => setTimeout(r, 4000)); // give WhatsApp Web a moment to sync chats
     const chats = await client.getChats();
-    console.log("\nYour groups (copy the id into config.toml → [whatsapp] group_id):\n");
-    for (const chat of chats.filter((c) => c.isGroup)) {
-      console.log(`${chat.id._serialized}   ${chat.name}`);
+    const groups = chats.filter((c) => c.isGroup);
+    if (groups.length) {
+      console.log("\nYour groups (copy the id into config.toml → [whatsapp] group_id):\n");
+      for (const chat of groups) console.log(`${chat.id._serialized}   ${chat.name}`);
+    } else {
+      console.log("\nNo groups loaded (WhatsApp Web only syncs recent chats up front).");
+      console.log("Run `npm run find-group` instead, then send a message in the group.");
     }
     await client.destroy();
     process.exit(0);
   });
+  client.initialize();
+}
+
+// Reliable fallback: print the id of any group you send a message in.
+function runFindGroup() {
+  const client = makeClient();
+  attachQr(client);
+  const seen = new Set();
+  client.on("ready", () => {
+    console.log("\nConnected. Now open your group on your phone and send any message (e.g. \"hi\").");
+    console.log("The group's id will appear below. Press Ctrl+C once you've copied it.\n");
+  });
+  const handler = async (msg) => {
+    try {
+      const chat = await msg.getChat();
+      if (chat.isGroup && !seen.has(chat.id._serialized)) {
+        seen.add(chat.id._serialized);
+        console.log(`${chat.id._serialized}   ${chat.name}`);
+      }
+    } catch {}
+  };
+  client.on("message", handler);        // someone else's message
+  client.on("message_create", handler); // your own message (incl. from your phone)
   client.initialize();
 }
 
@@ -258,6 +286,8 @@ if (args.includes("--dry-run")) {
   runDryRun();
 } else if (args.includes("--list-groups")) {
   runListGroups();
+} else if (args.includes("--find-group")) {
+  runFindGroup();
 } else {
   runPost(normalizeChatId(argValue("--to")), argValue("--text"));
 }

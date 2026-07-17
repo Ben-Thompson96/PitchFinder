@@ -8,5 +8,6 @@ venv/
 node_modules/
 
 # WhatsApp session — this IS your login. Never commit it.
+.baileys_auth/
 .wwebjs_auth/
 .wwebjs_cache/

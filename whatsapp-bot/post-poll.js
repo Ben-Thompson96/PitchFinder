@@ -16,12 +16,13 @@ const fs = require("fs");
 const path = require("path");
 const TOML = require("@iarna/toml");
 const qrcode = require("qrcode-terminal");
-const { Client, LocalAuth, Poll } = require("whatsapp-web.js");
+// Baileys is ESM-only, so it's loaded lazily via dynamic import() inside connect().
 
 const CONFIG_PATH = path.join(__dirname, "..", "config.toml");
 const API_URL = "https://hireapitch.com/venue/getBookingSlots";
 const ALLOWED_HOURS_FALLBACK = [18, 19];
 const MAX_POLL_OPTIONS = 12; // WhatsApp's hard limit.
+const AUTH_DIR = path.join(__dirname, ".baileys_auth");
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -129,38 +130,54 @@ async function buildPoll() {
 
 // --- Modes ------------------------------------------------------------------
 
-function makeClient() {
-  return new Client({
-    authStrategy: new LocalAuth({ dataPath: path.join(__dirname, ".wwebjs_auth") }),
-    puppeteer: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] },
-  });
-}
+// Baileys logs to stdout by default; a no-op logger keeps our output clean.
+const silentLogger = {
+  level: "silent",
+  trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {},
+  child() { return silentLogger; },
+};
 
-function attachQr(client) {
-  client.on("qr", (qr) => {
-    console.log("\nScan this with WhatsApp → Settings → Linked devices → Link a device:\n");
-    qrcode.generate(qr, { small: true });
-  });
-}
+// Connect (printing a QR to scan on first run), resolving with an open socket.
+// Auth persists in AUTH_DIR, so subsequent runs reconnect silently.
+async function connect() {
+  const baileys = await import("@whiskeysockets/baileys");
+  const makeWASocket = baileys.default;
+  const { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = baileys;
 
-// Resolve with the ack level once WhatsApp's server confirms the message
-// (ack >= 1 = single tick / server received), or 0 if nothing arrives in time.
-// Without this we'd destroy the client before the message actually flushes.
-function waitForServerAck(client, sent, timeoutMs) {
-  return new Promise((resolve) => {
-    const target = sent.id._serialized;
-    const onAck = (msg, ack) => {
-      if (msg.id._serialized === target && ack >= 1) {
-        client.removeListener("message_ack", onAck);
-        clearTimeout(timer);
-        resolve(ack);
-      }
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const { version } = await fetchLatestBaileysVersion();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const start = () => {
+      const sock = makeWASocket({
+        version,
+        auth: state,
+        logger: silentLogger,
+        browser: ["PitchFinder", "Chrome", "1.0"],
+      });
+      sock.ev.on("creds.update", saveCreds);
+      sock.ev.on("connection.update", (u) => {
+        if (u.qr) {
+          console.log("\nScan this with WhatsApp → Settings → Linked devices → Link a device:\n");
+          qrcode.generate(u.qr, { small: true });
+        }
+        if (u.connection === "open") {
+          if (!settled) { settled = true; resolve(sock); }
+        } else if (u.connection === "close") {
+          const code = u.lastDisconnect?.error?.output?.statusCode;
+          if (code === DisconnectReason.restartRequired) {
+            start(); // expected once right after first pairing — reconnect with saved creds
+          } else if (!settled) {
+            settled = true;
+            reject(new Error(code === DisconnectReason.loggedOut
+              ? `Logged out. Delete ${AUTH_DIR} and re-run to scan a fresh QR.`
+              : `Connection closed before ready (code ${code}).`));
+          }
+        }
+      });
     };
-    const timer = setTimeout(() => {
-      client.removeListener("message_ack", onAck);
-      resolve(0);
-    }, timeoutMs);
-    client.on("message_ack", onAck);
+    start();
   });
 }
 
@@ -176,48 +193,22 @@ async function runDryRun() {
   console.log("\n(dry run — nothing was posted)");
 }
 
-function runListGroups() {
-  const client = makeClient();
-  attachQr(client);
-  client.on("ready", async () => {
-    console.log(`\nMessage yourself (handy for testing): ${client.info.wid._serialized}`);
-    await new Promise((r) => setTimeout(r, 4000)); // give WhatsApp Web a moment to sync chats
-    const chats = await client.getChats();
-    const groups = chats.filter((c) => c.isGroup);
+async function runListGroups() {
+  const sock = await connect();
+  try {
+    const self = sock.user?.id?.split(":")[0];
+    if (self) console.log(`\nMessage yourself (handy for testing): ${self}@s.whatsapp.net`);
+    const groups = Object.values(await sock.groupFetchAllParticipating());
     if (groups.length) {
       console.log("\nYour groups (copy the id into config.toml → [whatsapp] group_id):\n");
-      for (const chat of groups) console.log(`${chat.id._serialized}   ${chat.name}`);
+      for (const g of groups) console.log(`${g.id}   ${g.subject}`);
     } else {
-      console.log("\nNo groups loaded (WhatsApp Web only syncs recent chats up front).");
-      console.log("Run `npm run find-group` instead, then send a message in the group.");
+      console.log("\nNo groups found on this account.");
     }
-    await client.destroy();
+  } finally {
+    sock.end(undefined);
     process.exit(0);
-  });
-  client.initialize();
-}
-
-// Reliable fallback: print the id of any group you send a message in.
-function runFindGroup() {
-  const client = makeClient();
-  attachQr(client);
-  const seen = new Set();
-  client.on("ready", () => {
-    console.log("\nConnected. Now open your group on your phone and send any message (e.g. \"hi\").");
-    console.log("The group's id will appear below. Press Ctrl+C once you've copied it.\n");
-  });
-  const handler = async (msg) => {
-    try {
-      const chat = await msg.getChat();
-      if (chat.isGroup && !seen.has(chat.id._serialized)) {
-        seen.add(chat.id._serialized);
-        console.log(`${chat.id._serialized}   ${chat.name}`);
-      }
-    } catch {}
-  };
-  client.on("message", handler);        // someone else's message
-  client.on("message_create", handler); // your own message (incl. from your phone)
-  client.initialize();
+  }
 }
 
 async function runPost(destOverride, textOverride) {
@@ -233,35 +224,27 @@ async function runPost(destOverride, textOverride) {
   // --text sends a plain message instead of the poll (handy for diagnosing).
   let content;
   if (textOverride) {
-    content = textOverride;
+    content = { text: textOverride };
   } else {
     if (options.length < 2) {
       console.log("Fewer than 2 free slots next week — nothing to post (a poll needs at least 2 options).");
       process.exit(0);
     }
     if (trimmed) console.log(`⚠️  ${trimmed} extra slot(s) dropped — WhatsApp polls allow max ${MAX_POLL_OPTIONS}.`);
-    content = new Poll(question, options, { allowMultipleAnswers: true });
+    content = { poll: { name: question, values: options, selectableCount: 0 } }; // 0 = allow multiple
   }
 
-  const client = makeClient();
-  attachQr(client);
-  client.on("ready", async () => {
-    try {
-      const sent = await client.sendMessage(dest, content);
-      const ack = await waitForServerAck(client, sent, 20000);
-      if (ack >= 1) {
-        console.log(`Sent to ${dest} — confirmed by server (ack=${ack}).`);
-      } else {
-        console.log(`⚠️  Sent to ${dest} but got NO server confirmation in 20s — it likely didn't go through.`);
-      }
-    } catch (err) {
-      console.error(`Send failed: ${err.message || err}`);
-    } finally {
-      await client.destroy();
-      process.exit(0);
-    }
-  });
-  client.initialize();
+  const sock = await connect();
+  try {
+    const sent = await sock.sendMessage(dest, content);
+    console.log(`Sent to ${dest}${sent?.key?.id ? ` (id ${sent.key.id})` : ""}.`);
+    await new Promise((r) => setTimeout(r, 1500)); // let the send flush before closing
+  } catch (err) {
+    console.error(`Send failed: ${err.message || err}`);
+  } finally {
+    sock.end(undefined);
+    process.exit(0);
+  }
 }
 
 // --- Entry point ------------------------------------------------------------
@@ -275,19 +258,17 @@ function argValue(name) {
   return i >= 0 ? args[i + 1] : null;
 }
 
-// Accept a full chat id (...@c.us / ...@g.us) or a bare phone number, which we
-// treat as a personal chat.
+// Accept a full jid (...@s.whatsapp.net / ...@g.us) or a bare phone number,
+// which we treat as a personal chat.
 function normalizeChatId(id) {
   if (!id || id.includes("@")) return id;
-  return id.replace(/\D/g, "") + "@c.us";
+  return id.replace(/\D/g, "") + "@s.whatsapp.net";
 }
 
 if (args.includes("--dry-run")) {
   runDryRun();
 } else if (args.includes("--list-groups")) {
   runListGroups();
-} else if (args.includes("--find-group")) {
-  runFindGroup();
 } else {
   runPost(normalizeChatId(argValue("--to")), argValue("--text"));
 }

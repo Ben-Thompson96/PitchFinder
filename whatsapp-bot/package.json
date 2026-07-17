@@ -6,12 +6,11 @@
   "scripts": {
     "start": "node post-poll.js",
     "groups": "node post-poll.js --list-groups",
-    "find-group": "node post-poll.js --find-group",
     "dry-run": "node post-poll.js --dry-run"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.34.7"
+    "@whiskeysockets/baileys": "^6.7.23",
+    "qrcode-terminal": "^0.12.0"
   }
 }
